@@ -72,6 +72,7 @@ namespace Data
         answer,
         busy,
         timeout,
-        chat
+        chat,
+        dissconnect
     }
 }

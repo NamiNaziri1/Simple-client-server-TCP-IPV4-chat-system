@@ -8,76 +8,74 @@ using System.IO;
 using System.Runtime.Serialization.Formatters.Binary;
 using System.Threading;
 using Data;
+using System.Runtime.InteropServices;
 namespace Client
 {
+
+
+
+
     class Client
     {
 
+
+
+
+        [DllImport("Kernel32")]
+        private static extern bool SetConsoleCtrlHandler(EventHandler handler, bool add);
+
+        private delegate bool EventHandler(CtrlType sig);
+        static EventHandler _handler;
+
+        enum CtrlType
+        {
+            CTRL_C_EVENT = 0,
+            CTRL_BREAK_EVENT = 1,
+            CTRL_CLOSE_EVENT = 2,
+            CTRL_LOGOFF_EVENT = 5,
+            CTRL_SHUTDOWN_EVENT = 6
+        }
+
+        private static bool Handler(CtrlType sig)
+        {
+            switch (sig)
+            {
+                case CtrlType.CTRL_C_EVENT:
+                case CtrlType.CTRL_LOGOFF_EVENT:
+                case CtrlType.CTRL_SHUTDOWN_EVENT:
+                case CtrlType.CTRL_CLOSE_EVENT:
+                    Packet p = new Packet(PacketType.dissconnect, "");
+
+                    master.Send(p.ToBytes());
+                    master.Close();
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+
+
+
+
         public static Socket master;
         public static string id;
-
+        static IPEndPoint ipE;
         static bool flag = true;
 
 
         static void Main(string[] args)
         {
+            _handler += new EventHandler(Handler);
+            SetConsoleCtrlHandler(_handler, true);
 
+            
 
-            master = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            Connecect();
 
-            IPEndPoint ipE = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 12345);
+            
 
-            try
-            {
-                master.Connect(ipE);
-
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine(ex.ToString());
-                Thread.Sleep(1000);
-
-            }
-
-            Thread t = new Thread(DataIN);
-            t.Start();
-
-            while (true)
-            {
-                try
-                {
-                    Console.Write(":: >");
-                    string input = Console.ReadLine();
-                    Packet p;
-                    
-
-                    if (input != "" && flag)
-                    {
-                        p = new Packet(PacketType.answer, input);
-                        master.Send(p.ToBytes());
-                        flag = false;
-                    }
-                    else if(flag == false)
-                    {
-                        ConsoleColor c = Console.ForegroundColor;
-                        Console.ForegroundColor = ConsoleColor.Yellow;
-                        Console.WriteLine("Wait for your answer");
-                        Console.ForegroundColor = c;
-                    }
-
-                }
-                catch (SocketException ex)
-                {
-                    Console.WriteLine(ex.Message);
-                    Console.WriteLine("Server has disconnected");
-                    Console.ReadLine();
-                    Environment.Exit(0);
-                }
-                catch
-                {
-                    Environment.Exit(0);
-                }
-            }
+            
         }
 
         static void DataIN()
@@ -97,11 +95,14 @@ namespace Client
                         DataManager(new Packet(Buffer));
                     }
                 }
-                catch (SocketException ex)
+                catch 
                 {
-                    Console.WriteLine(ex.Message);
-                    Console.ReadLine();
-                    Environment.Exit(0);
+                    ConsoleColor cc = Console.ForegroundColor;
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine("Server Disconnected");
+                    Console.ForegroundColor = cc;
+                    master.Close();
+                    Connecect();
                 }
             }
         }
@@ -111,15 +112,22 @@ namespace Client
             switch (p.packetType)
             {
                 case PacketType.Registration:
-                    SendMassage();
+                    Console.Write(":: >");
+                    Console.WriteLine("You Have Registered");
+                    Console.Write(":: >");
+                    SendMessage();
+
                     break;
                 case PacketType.answer:
                     flag = true;
                     ConsoleColor c = Console.ForegroundColor;
                     Console.ForegroundColor = ConsoleColor.Cyan;
+                    Console.Write(":: >");
                     Console.WriteLine(p.message);
                     Console.ForegroundColor = c;
                     Console.Write(":: >");
+                    SendMessage();
+
                     break;
                 case PacketType.busy:
                     Console.ForegroundColor = ConsoleColor.Red;
@@ -133,13 +141,103 @@ namespace Client
                     Console.ReadLine();
                     Environment.Exit(0);
                     break;
+                case PacketType.dissconnect:
+                    ConsoleColor cc = Console.ForegroundColor;
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine("Server Disconnected");
+                    Console.ForegroundColor = cc;
+                    master.Close();
+                    Connecect();
+                    break;
                     
             }
         }
         static void SendMessage()
         {
+            while (true)
+            {
 
+
+                try
+                {
+                    
+                    string input = Console.ReadLine();
+                    Packet p;
+
+
+                    if (input != "")
+                    {
+                        p = new Packet(PacketType.answer, input);
+                        master.Send(p.ToBytes());
+                        
+                        break;
+                    }
+
+
+                }
+                catch (SocketException ex)
+                {
+                    ConsoleColor cc = Console.ForegroundColor;
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine(ex.Message);
+                    Console.WriteLine("Server Disconnected");
+                    Console.ForegroundColor = cc;
+                    master.Close();
+                    Connecect();
+                }
+                catch
+                {
+                    Environment.Exit(0);
+                }
+            }
+
+            
         }
 
+
+        static void Connecect()
+        {
+
+           
+            while (true)
+            {
+                master = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+
+                ipE = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 12345);
+                try
+                {
+                    master.Connect(ipE);
+                    Thread t = new Thread(DataIN);
+                    t.Start();
+                    break;
+
+                }
+                catch (SocketException ex)
+                {
+                    if (ex.ErrorCode == 10061)
+                    {
+                        ConsoleColor c = Console.ForegroundColor;
+                        Console.ForegroundColor = ConsoleColor.DarkYellow;
+                        Console.WriteLine("===============================================");
+                        Console.WriteLine("Can not connect to the server");
+                        Console.WriteLine("Maybe server is down");
+                        Console.WriteLine("reconnect in 2 sec");
+                        Console.ForegroundColor = c;
+                        Thread.Sleep(2000);
+
+
+
+                    }
+                    else
+                    {
+                        Console.WriteLine(ex.ErrorCode);
+                        Console.WriteLine(ex.ToString());
+                        Thread.Sleep(2000);
+
+                    }
+
+                }
+            }
+        }
     }
 }

@@ -8,15 +8,64 @@ using System.IO;
 using System.Runtime.Serialization.Formatters.Binary;
 using System.Threading;
 using Data;
+using System.Runtime.InteropServices;
 namespace Server
 {
+
+
     class Server
     {
+
+        [DllImport("Kernel32")]
+        private static extern bool SetConsoleCtrlHandler(EventHandler handler, bool add);
+
+        private delegate bool EventHandler(CtrlType sig);
+        static EventHandler _handler;
+
+        enum CtrlType
+        {
+            CTRL_C_EVENT = 0,
+            CTRL_BREAK_EVENT = 1,
+            CTRL_CLOSE_EVENT = 2,
+            CTRL_LOGOFF_EVENT = 5,
+            CTRL_SHUTDOWN_EVENT = 6
+        }
+
+        private static bool Handler(CtrlType sig)
+        {
+            switch (sig)
+            {
+                case CtrlType.CTRL_C_EVENT:
+                case CtrlType.CTRL_LOGOFF_EVENT:
+                case CtrlType.CTRL_SHUTDOWN_EVENT:
+                case CtrlType.CTRL_CLOSE_EVENT:
+                    Packet p = new Packet(PacketType.dissconnect, "");
+                    foreach (ClientData cd in clients)
+                    {
+                        cd.clientSocket.Send(p.ToBytes());
+                        cd.clientSocket.Close();
+                    }
+                    
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+
+
         static Socket listenerSocket;
         static List<ClientData> clients;
-        static bool flag = false;
         static void Main(string[] args)
         {
+
+
+            /////////////////////////////////////////
+            _handler += new EventHandler(Handler);
+            SetConsoleCtrlHandler(_handler, true);
+            /////////////////////////////////////////
+
+
             clients = new List<ClientData>();
 
             
@@ -69,8 +118,8 @@ namespace Server
         {
             ClientData cd = (ClientData)ob;
             Socket clientSocket = cd.clientSocket;
+            
 
-            clientSocket.ReceiveTimeout = 10000;
             byte[] Buffer;
             int readBytes;
 
@@ -80,7 +129,6 @@ namespace Server
                 {
                     Buffer = new byte[clientSocket.SendBufferSize];
 
-
                     readBytes = clientSocket.Receive(Buffer);
 
                     if (readBytes > 0)
@@ -89,32 +137,10 @@ namespace Server
                         DataManager(packet, cd);
                     }
                 }
-                catch (ObjectDisposedException e)
+                catch 
                 {
-                    Console.WriteLine("Caught: {0}", e.Message);
-                }
-                catch (SocketException ex)
-                {
-
-                    if (ex.ErrorCode == 10060)
-                    {
-                        Console.WriteLine("Client timed out!");
-                        Packet p = new Packet(PacketType.timeout, "server");
-                        clientSocket.Send(p.ToBytes());
-                        clientSocket.Close();
-                        clients.Remove(cd);
-                        Console.WriteLine("Number Of Current Client: " + clients.Count);
-                    }
-                    else
-                    {
-                        Console.WriteLine(ex.ErrorCode);
-                        Console.WriteLine("A Client disconnected!");
-                        clientSocket.Close();
-                        clients.Remove(cd);
-                        Console.WriteLine("Number Of Current Client: " + clients.Count);
-                    }
-
-
+                    
+                    
                     break;
                 }
             }
@@ -125,49 +151,55 @@ namespace Server
             {
                 
                 case PacketType.answer:
-                    flag = false;
                     ConsoleColor c = Console.ForegroundColor;
                     Console.ForegroundColor = ConsoleColor.Cyan;
+                    Console.Write(":: >");
                     Console.WriteLine(p.message);
                     Console.ForegroundColor = c;
                     Console.Write(":: >");
                     SendMessage(cd);
 
                     break;
-
+                case PacketType.dissconnect:
+                    Console.WriteLine("A Client disconnected!");
+                    cd.clientSocket.Close();
+                    clients.Remove(cd);
+                    Console.WriteLine("Number Of Current Client: " + clients.Count);
+                    break;
             }
         }
 
         public static void SendMessage(ClientData cd)
         {
-            string input = Console.ReadLine();
-            Packet p;
-
-            try
+            while (true)
             {
-                if (input != "" && !flag)
+                string input = Console.ReadLine();
+                Packet p;
+
+                try
                 {
-                    p = new Packet(PacketType.answer, input);
-                    cd.clientSocket.Send(p.ToBytes());
-                    flag = true;
+
+                    if (input != "")
+                    {
+                        p = new Packet(PacketType.answer, input);
+                        cd.clientSocket.Send(p.ToBytes());
+                        break;
+                    }
+                    
                 }
-                else if (!flag == false)
+                catch (SocketException ex)
                 {
-                    Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.WriteLine("Wait for your answer");
+                    Console.WriteLine("A Client disconnected!");
+                    cd.clientSocket.Close();
+                    clients.Remove(cd);
+                    Console.WriteLine("Number Of Current Client: " + clients.Count);
                     Console.ReadLine();
                     Environment.Exit(0);
                 }
-            }
-            catch (SocketException ex)
-            {
-                Console.WriteLine("Server has disconnected");
-                Console.ReadLine();
-                Environment.Exit(0);
-            }
-            catch
-            {
-                Environment.Exit(0);
+                catch
+                {
+                    Environment.Exit(0);
+                }
             }
         }
 
